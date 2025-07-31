@@ -1,17 +1,18 @@
 {
-  "name": "hubbdbot",
+  "name": "hub-bd-bot",
   "version": "1.0.0",
+  "description": "Telegram bot for Hub BD",
   "main": "index.js",
   "scripts": {
+    "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
+  "author": "Creator H",
   "license": "ISC",
   "dependencies": {
-    "express": "^5.1.0",
-    "firebase-admin": "^13.4.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "firebase-admin": "^12.1.1",
     "node-telegram-bot-api": "^0.66.0"
-  },
-  "description": ""
+  }
 }

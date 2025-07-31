@@ -1,16 +1,12 @@
-# এই ফাইলটি Git-কে বলে দেয় কোন ফাইল/ফোল্ডার উপেক্ষা করতে হবে
-
-# Firebase-এর গোপন সার্ভিস কী।
-# এটি কোনোভাবেই GitHub-এ আপলোড করা উচিত নয়!
-serviceAccountKey.json
-
-# Node.js-এর সমস্ত ইনস্টল করা লাইব্রেরি।
-# এটি অনেক বড় একটি ফোল্ডার এবং npm install কমান্ড দিলেই এটি আবার তৈরি হয়ে যায়।
+# Node.js dependencies
 node_modules/
 
-# Environment variable ফাইল (যদি ব্যবহার করেন)
+# Firebase service account key (NEVER commit this!)
+serviceAccountKey.json
+
+# Environment variables file for local development
 .env
 
-# অপারেটিং সিস্টেমের তৈরি করা অপ্রয়োজনীয় ফাইল
+# OS-generated files
 .DS_Store
-npm-debug.log
+npm-debug.log*

@@ -1,163 +1,99 @@
 // bot_controller.js
-
 const config = require('./config');
 const constants = require('./constants');
-const firebaseService = require('./services/firebase_service');
+const firebase = require('./services/firebase_service');
 
 class BotController {
   constructor(bot) {
     this.bot = bot;
   }
 
-  // เริ่มรอรับข้อความและ event ต่างๆ
   listen() {
     this.bot.onText(/\/start(?: (.+))?/, (msg, match) => this.handleStart(msg, match));
     this.bot.on('message', (msg) => this.handleMessage(msg));
   }
 
-  // จัดการคำสั่ง /start
   async handleStart(msg, match) {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    const name = msg.from.first_name || 'ผู้ใช้';
-    const referrerId = match[1]; // ID ของผู้แนะนำ (ถ้ามี)
+    const name = msg.from.first_name || 'User';
+    const referrerId = match ? match[1] : null;
 
     try {
-      // ค้นหาหรือสร้างผู้ใช้ใหม่
-      await firebaseService.findOrCreateUser(userId, name);
-      
-      // ตรวจสอบว่ามีผู้แนะนำหรือไม่ และผู้แนะนำไม่ใช่ตัวเอง
+      await firebase.findOrCreateUser(userId, name);
       if (referrerId && referrerId !== String(userId)) {
-        // เพิ่มคะแนนให้ผู้แนะนำ
-        await firebaseService.incrementReferral(referrerId, config.referralBonus);
-        console.log(`ผู้ใช้ ${userId} เข้าร่วมผ่านการแนะนำของ ${referrerId}`);
-        // อาจจะส่งข้อความแจ้งเตือนไปให้ผู้แนะนำ
-        this.bot.sendMessage(referrerId, `ยินดีด้วย! มีคนเข้าร่วมผ่านลิงก์ของคุณ และคุณได้รับ ${config.referralBonus} BDT`);
+        await firebase.incrementReferralData(referrerId, config.referralBonus);
+        this.bot.sendMessage(referrerId, `অভিনন্দন! ${name} আপনার রেফারে জয়েন করেছে। আপনি ${config.referralBonus} টাকা বোনাস পেয়েছেন।`)
+            .catch(e => console.error(`Could not notify referrer ${referrerId}`));
       }
 
-      const welcomeText = constants.welcomeMessage(name);
-      const options = {
+      const welcomeText = constants.messages.welcome(name);
+      const keyboard = {
         reply_markup: {
           keyboard: [
-            [{ text: constants.mainMenu.openWeb }],
-            [{ text: constants.mainMenu.viralVideo }, { text: constants.mainMenu.referral }],
-            [{ text: constants.mainMenu.withdraw }, { text: constants.mainMenu.leaderboard }],
-          ],
-          resize_keyboard: true,
+            [{ text: constants.buttons.openWeb, web_app: { url: config.links.miniAppLink } }],
+            [{ text: constants.buttons.viralVideo }, { text: constants.buttons.referAndEarn }],
+            [{ text: constants.buttons.withdraw }, { text: constants.buttons.leaderboard }],
+          ], resize_keyboard: true,
         },
       };
-      
-      // ส่งรูปภาพต้อนรับพร้อมกับเมนู
-      this.bot.sendPhoto(chatId, config.welcomeImage, {
-        caption: welcomeText,
-        ...options,
-      });
 
+      await this.bot.sendPhoto(chatId, config.links.welcomeImage, { caption: welcomeText, ...keyboard });
     } catch (error) {
-      console.error('เกิดข้อผิดพลาดที่ handleStart:', error);
-      this.bot.sendMessage(chatId, 'เกิดข้อผิดพลาดบางอย่าง โปรดลองอีกครั้ง');
+      console.error('Error in handleStart:', error);
+      this.bot.sendMessage(chatId, constants.messages.generalError);
     }
   }
 
-  // จัดการข้อความทั่วไปและปุ่มเมนู
   async handleMessage(msg) {
+    if (!msg.text || msg.text.startsWith('/start')) return;
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    const text = msg.text;
-
-    // ไม่สนใจคำสั่ง /start เพราะจัดการไปแล้ว
-    if (text && text.startsWith('/start')) {
-      return;
-    }
 
     try {
-      const user = await firebaseService.findOrCreateUser(userId, msg.from.first_name);
-      if (!user) {
-        return this.bot.sendMessage(chatId, 'ไม่พบข้อมูลของคุณ โปรดพิมพ์ /start เพื่อเริ่มต้น');
-      }
+      const user = await firebase.findOrCreateUser(userId, msg.from.first_name);
 
-      switch (text) {
-        case constants.mainMenu.openWeb:
-          // จัดการปุ่ม Open Web App
-          this.bot.sendMessage(chatId, `คลิกที่นี่เพื่อเปิดแอป: ${config.miniAppLink}`);
-          break;
-        
-        case constants.mainMenu.viralVideo:
-          // จัดการปุ่ม Viral Video
-          await this.handleViralVideo(chatId, user);
-          break;
-        
-        case constants.mainMenu.referral:
-          // จัดการปุ่ม Refer & Earn
+      switch (msg.text) {
+        case constants.buttons.referAndEarn:
           const referralLink = `https://t.me/${config.botUsername}?start=${userId}`;
-          const referralText = constants.referralInfo(user.totalReferralCount, user.balance, referralLink);
+          const referralText = constants.messages.referralInfo(user.totalReferralCount, user.balance, referralLink);
           this.bot.sendMessage(chatId, referralText, { parse_mode: 'Markdown' });
           break;
 
-        case constants.mainMenu.withdraw:
-          // จัดการปุ่ม Withdraw
-          const withdrawText = constants.withdrawInfo(user.balance);
-          this.bot.sendMessage(chatId, withdrawText, { parse_mode: 'Markdown' });
-          // เพิ่มโค้ดสำหรับแสดงปุ่มช่องทางการถอนเงิน
+        case constants.buttons.viralVideo:
+          const required = config.referralsNeededForDownload;
+          const current = user.totalReferralCount;
+          if (current >= required) {
+            this.bot.sendMessage(chatId, constants.messages.referralGoalReached, {
+              reply_markup: { inline_keyboard: [[{ text: constants.messages.downloadButtonText, url: config.links.downloadLink }]] }
+            });
+          } else {
+            const prompt = constants.messages.viralVideoPrompt(required, current);
+            this.bot.sendPhoto(chatId, config.links.viralVideoImage, { caption: prompt, parse_mode: 'Markdown' });
+          }
           break;
 
-        case constants.mainMenu.leaderboard:
-          // จัดการปุ่ม Leaderboard
-          await this.handleLeaderboard(chatId);
+        case constants.buttons.withdraw:
+          this.bot.sendMessage(chatId, constants.messages.withdrawInfo(user.balance), { parse_mode: 'Markdown' });
           break;
-
-        default:
-          // จัดการข้อความอื่นๆ ที่ไม่ตรงกับเมนู
-          // this.bot.sendMessage(chatId, 'โปรดเลือกเมนูด้านล่าง');
+          
+        case constants.buttons.leaderboard:
+          const users = await firebase.getLeaderboardUsers();
+          if (users.length === 0) {
+            return this.bot.sendMessage(chatId, constants.messages.leaderboardNotAvailable);
+          }
+          let leaderboardText = constants.messages.leaderboardHeader;
+          users.forEach((u, i) => {
+            leaderboardText += `${i + 1}. *${u.name}* - ${u.weeklyReferralCount} টি রেফার\n`;
+          });
+          leaderboardText += constants.messages.leaderboardFooter;
+          this.bot.sendMessage(chatId, leaderboardText, { parse_mode: 'Markdown' });
           break;
       }
     } catch (error) {
-      console.error('เกิดข้อผิดพลาดที่ handleMessage:', error);
+      console.error('Error in handleMessage:', error);
+      this.bot.sendMessage(chatId, constants.messages.generalError);
     }
-  }
-
-  // จัดการส่วน Viral Video
-  async handleViralVideo(chatId, user) {
-    const required = config.referralsNeededForDownload;
-    const current = user.totalReferralCount;
-
-    if (current >= required) {
-      // ถ้าแนะนำครบแล้ว
-      this.bot.sendMessage(chatId, constants.referralGoalReached, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: constants.downloadButtonText, url: config.downloadLink }],
-          ],
-        },
-      });
-    } else {
-      // ถ้ายังแนะนำไม่ครบ
-      const prompt = constants.viralVideoPrompt
-        .replace('{REQUIRED}', required)
-        .replace('{CURRENT}', current);
-
-      this.bot.sendPhoto(chatId, config.viralVideoImage, {
-        caption: prompt,
-        parse_mode: 'Markdown',
-      });
-    }
-  }
-
-  // จัดการส่วน Leaderboard
-  async handleLeaderboard(chatId) {
-    const leaderboardData = await firebaseService.getLeaderboard();
-    
-    if (leaderboardData.length === 0) {
-      return this.bot.sendMessage(chatId, 'ยังไม่มีข้อมูลในลีดเดอร์บอร์ด');
-    }
-
-    let message = constants.leaderboardHeader;
-    leaderboardData.forEach((user, index) => {
-      message += `${index + 1}. *${user.name}* - ${user.weeklyReferralCount} คน\n`;
-    });
-
-    this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
   }
 }
-
 module.exports = BotController;
